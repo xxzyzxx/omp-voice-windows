@@ -19,7 +19,7 @@ Dictation always uses the **Windows default recording device**, and speech plays
 ## Install (PowerShell 7 or Windows PowerShell 5.1)
 
 ```powershell
-git clone <this-repo-url> "$env:USERPROFILE\omp-voice"
+git clone https://github.com/xxzyzxx/omp-voice-windows.git "$env:USERPROFILE\omp-voice"
 $root = "$env:USERPROFILE\omp-voice"
 
 # 1. Kokoro TTS: a dedicated venv plus model files (about 350 MB, nothing system-wide)

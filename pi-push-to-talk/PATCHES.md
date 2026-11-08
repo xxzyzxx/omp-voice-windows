@@ -1,6 +1,6 @@
 # Windows/OMP patches on pi-push-to-talk 0.6.3
 
-The upstream package comes from npm (`git log`: commit 1 is unmodified). Every change is marked `[omp-windows patch]` in the source.
+The upstream package comes from npm. The tag `pi-push-to-talk-0.6.3-upstream` marks the unmodified import, so `git diff pi-push-to-talk-0.6.3-upstream HEAD:pi-push-to-talk` shows every patch. Every change is also marked `[omp-windows patch]` in the source.
 
 | File | Change | Why |
 |---|---|---|
