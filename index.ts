@@ -19,6 +19,8 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 const HOME_DIR = path.join(os.homedir(), ".omp", "talk-local");
 const SETTINGS_FILE = path.join(os.homedir(), ".omp", "talk-local.json");
 const WORKER_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "worker", "kokoro_worker.py");
+/** `$env:OMP_TALK_DEBUG='1'` appends every worker event (with timings) here. */
+const DEBUG_LOG = process.env.OMP_TALK_DEBUG ? path.join(os.tmpdir(), "omp-talk-local.log") : undefined;
 
 type Style = "succinct" | "verbose";
 
@@ -149,6 +151,11 @@ class KokoroWorker {
 				const line = buffered.slice(0, end).trim();
 				buffered = buffered.slice(end + 1);
 				if (!line) continue;
+				if (DEBUG_LOG) {
+					try {
+						fs.appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${line}\n`);
+					} catch {}
+				}
 				let event: WorkerEvent;
 				try {
 					event = JSON.parse(line) as WorkerEvent;
