@@ -63,4 +63,10 @@ export class DictationEditor extends CustomEditor {
 		super.handleInput("\x7f");
 		this.tui.requestRender(true);
 	}
+
+	/** [omp-windows patch] Press Enter: submit exactly as the user would (commands, steering, `input` hooks). */
+	submitPrompt(): void {
+		super.handleInput("\r");
+		this.tui.requestRender(true);
+	}
 }

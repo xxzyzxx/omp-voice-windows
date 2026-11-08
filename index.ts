@@ -5,6 +5,7 @@ import { ProbeEditor } from "./src/probe.ts";
 import { listAudioSources, pinAudioSource } from "./src/source.ts";
 import { parseHost, writeSetup } from "./src/setup.ts";
 import { Stt } from "./src/stt.ts";
+import { VoiceOnlyMode } from "./src/voice-only.ts";
 
 type Ui = {
 	notify: (message: string, level: "info" | "warning" | "error") => void;
@@ -48,6 +49,27 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 			const circle = filled ? (ui?.theme.fg("error", "●") ?? "●") : "○";
 			if (state === "loading") return `${circle} loading model`;
 			return client ? `${circle} listening via ${client}` : `${circle} listening`;
+		},
+		// [omp-windows patch] Lets other extensions (omp-talk-local) stop speaking.
+		onStart: () => process.emit("omp-voice:dictation-start" as never),
+		// [omp-windows patch] Voice-only mode: one hold, one prompt.
+		onCommitted: () => {
+			if (voiceOnlyMode.active && editor && editor.focused !== false) editor.submitPrompt();
+		},
+	});
+	const voiceOnlyMode = new VoiceOnlyMode(hold);
+	const showMode = (): void => ui?.setStatus("voice-only", voiceOnlyMode.active ? "🎙 voice-only" : undefined);
+
+	pi.registerCommand("voice-only", {
+		description: "Toggle voice-only mode: global hold key (works in background) and auto-send after each dictation",
+		handler: async (_args, ctx) => {
+			if (voiceOnlyMode.active) {
+				voiceOnlyMode.disable();
+				ctx.ui.notify("Voice-only mode off: hold Space in the prompt, press Enter to send", "info");
+			} else {
+				ctx.ui.notify(await voiceOnlyMode.enable(), "info");
+			}
+			showMode();
 		},
 	});
 
@@ -124,6 +146,11 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		unsubscribe = process.env.PI_DICTATION_PROBE
 			? undefined
 			: ctx.ui.onTerminalInput((data) => (hold.handle(data) ? { consume: true } : undefined));
+
+		void voiceOnlyMode.restore().then((notice) => {
+			if (notice) ui?.notify(notice, "info");
+			showMode();
+		});
 	});
 
 	// A submitted prompt clears the editor; an open session must not refill it
@@ -134,6 +161,7 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", () => {
 		hold.cancel();
+		voiceOnlyMode.disable(false);
 		unsubscribe?.();
 		unsubscribe = undefined;
 	});

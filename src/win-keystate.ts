@@ -9,7 +9,7 @@
  */
 import { dlopen, FFIType } from "bun:ffi";
 
-const VK_SPACE = 0x20;
+export const VK_SPACE = 0x20;
 
 let read: ((vk: number) => boolean) | null | undefined;
 

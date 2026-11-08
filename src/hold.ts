@@ -19,7 +19,7 @@ import type { DictationEditor } from "./editor.ts";
 import { createRegion } from "./region.ts";
 import { DictationSession, type SessionUi } from "./session.ts";
 import type { Stt } from "./stt.ts";
-import { keyDown } from "./win-keystate.ts";
+import { keyDown, VK_SPACE } from "./win-keystate.ts";
 
 /** [omp-windows patch] How often the OS key state is read while a hold is live. */
 const RELEASE_POLL_MS = 25;
@@ -33,6 +33,10 @@ export type HoldDeps = {
 	indicator: (state: "loading" | "listening", filled: boolean, client?: string) => string;
 	/** Test seam; production uses DictationSession. */
 	createSession?: (stt: Stt | Promise<Stt>, ui: SessionUi) => DictationSession;
+	/** [omp-windows patch] A dictation session is starting (e.g. silence speech output). */
+	onStart?: () => void;
+	/** [omp-windows patch] A session ended with text in the editor (voice-only mode submits it). */
+	onCommitted?: () => void;
 };
 
 export class SpaceHold {
@@ -52,8 +56,10 @@ export class SpaceHold {
 	private pendingDelete = 0;
 	/** Resolves when the previous session finished its final decode. */
 	private stopping: Promise<unknown> = Promise.resolve();
-	/** [omp-windows patch] Reads the physical space key while a hold is live. */
+	/** [omp-windows patch] Reads the physical hold key while a hold is live. */
 	private releasePoll: ReturnType<typeof setInterval> | undefined;
+	/** [omp-windows patch] The key whose release ends the live hold: Space, or the global key. */
+	private holdVk = VK_SPACE;
 
 	constructor(deps: HoldDeps) {
 		this.deps = deps;
@@ -136,17 +142,38 @@ export class SpaceHold {
 		// The triggering repeat is consumed, so only earlier presses typed a space.
 		this.pendingDelete += this.typedSpaces;
 		this.typedSpaces = 0;
+		this.holdVk = VK_SPACE;
 		this.requestBegin(this.holdId);
 		return true;
+	}
+
+	/**
+	 * [omp-windows patch] Start a hold from voice-only mode's global key. No
+	 * spaces were typed, so there is nothing to take back; the OS poll ends it.
+	 */
+	beginGlobal(vk: number): void {
+		if (this.session?.isActive() || this.starting) return;
+		trace(`global key 0x${vk.toString(16)} held`);
+		this.holdVk = vk;
+		this.holding = true;
+		this.holdId++;
+		this.typedSpaces = 0;
+		this.pendingDelete = 0;
+		this.requestBegin(this.holdId);
 	}
 
 	private finish(): void {
 		this.holding = false;
 		this.stopReleasePoll();
 		if (!this.session) return;
-		this.stopping = this.session.stop().catch((error: unknown) => {
-			this.deps.notify(`Dictation: ${String(error)}`, "error");
-		});
+		this.stopping = this.session
+			.stop()
+			.then((committed) => {
+				if (committed) this.deps.onCommitted?.();
+			})
+			.catch((error: unknown) => {
+				this.deps.notify(`Dictation: ${String(error)}`, "error");
+			});
 	}
 
 	/**
@@ -156,14 +183,14 @@ export class SpaceHold {
 	 */
 	private startReleasePoll(id: number): void {
 		this.stopReleasePoll();
-		if (keyDown() === undefined) return;
+		if (keyDown(this.holdVk) === undefined) return;
 		this.releasePoll = setInterval(() => {
 			try {
 				if (id !== this.holdId) {
 					this.stopReleasePoll();
 					return;
 				}
-				if (keyDown() === false) {
+				if (keyDown(this.holdVk) === false) {
 					trace("release from OS key state");
 					this.finish();
 				}
@@ -231,6 +258,7 @@ export class SpaceHold {
 			const create = this.deps.createSession ?? ((engine, sessionUi) => new DictationSession(engine, sessionUi));
 			const session = create(stt, ui);
 			this.session = session;
+			this.deps.onStart?.();
 			await session.start(createRegion(editor.getText(), editor.insertionOffset()));
 
 			// Cancelled while the device was opening: leave the buffer alone.
@@ -242,6 +270,8 @@ export class SpaceHold {
 				const committed = await session.stop();
 				if (!committed) {
 					for (let i = 0; i < takenBack; i++) editor.typeSpace();
+				} else {
+					this.deps.onCommitted?.();
 				}
 			}
 		} catch (error) {
