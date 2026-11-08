@@ -6,7 +6,6 @@
  * some Linux setups.
  */
 import { SAMPLE_RATE, msToSamples } from "./config.ts";
-import { captureDevice } from "./local-config.ts";
 import { loadDecibri } from "./native.ts";
 import { int16ToFloat32 } from "./pcm.ts";
 
@@ -52,7 +51,6 @@ export async function openMicrophone(
 		once(event: string, listener: () => void): void;
 		stop(): void;
 	};
-	const device = captureDevice();
 	let failure: Error = new Error("no capture device");
 
 	for (const rate of FALLBACK_RATES) {
@@ -62,7 +60,6 @@ export async function openMicrophone(
 				channels: 1,
 				framesPerBuffer: Math.round((msToSamples(100) * rate) / SAMPLE_RATE),
 				format: "int16",
-				...(device ? { device } : {}),
 			});
 			const resample = makeResampler(rate);
 			let stopped = false;

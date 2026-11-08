@@ -2,7 +2,6 @@
  * [omp-windows patch] Local user config: `%USERPROFILE%\.omp\push-to-talk.json`.
  *
  *   {
- *     "device": "Microphone",   // capture device name substring (default: OS default input)
  *     "focusKey": "RightCtrl",  // hold-to-talk while this OMP window has focus, or "off"
  *     "focusHoldMs": 150,       // how long the focus key must be held alone
  *     "voiceOnly": false,       // voice-only mode, toggled by /voice-only
@@ -10,8 +9,8 @@
  *     "globalHoldMs": 250       // voice-only mode: how long that key must be held alone
  *   }
  *
- * The OS default input may be a virtual cable (voice changers, VB-Audio), which
- * records silence, hence `device`. `PI_DICTATION_DEVICE` overrides it.
+ * Dictation always records from the Windows default input device, opened
+ * fresh for each dictation, so switching it in Windows takes effect at once.
  * Read on every use, so edits apply without restarting OMP.
  */
 import fs from "node:fs";
@@ -21,7 +20,6 @@ import path from "node:path";
 export const LOCAL_CONFIG_FILE = path.join(os.homedir(), ".omp", "push-to-talk.json");
 
 type LocalConfig = {
-	device?: unknown;
 	focusKey?: unknown;
 	focusHoldMs?: unknown;
 	voiceOnly?: unknown;
@@ -45,13 +43,6 @@ export function setVoiceOnly(on: boolean): void {
 
 export function voiceOnly(): boolean {
 	return readConfig().voiceOnly === true;
-}
-
-export function captureDevice(): string | undefined {
-	const env = process.env.PI_DICTATION_DEVICE?.trim();
-	if (env) return env;
-	const { device } = readConfig();
-	return typeof device === "string" && device.trim() ? device.trim() : undefined;
 }
 
 /** Keys that type nothing into the window when held. Any virtual-key number also works. */
