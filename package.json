@@ -1,0 +1,60 @@
+{
+  "name": "pi-push-to-talk",
+  "version": "0.6.3",
+  "type": "module",
+  "description": "Hold space to dictate into pi's prompt, transcribed locally with Whisper.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "dictation",
+    "push-to-talk",
+    "speech-to-text",
+    "whisper",
+    "local"
+  ],
+  "license": "MIT",
+  "author": "sqwxl",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sqwxl/pi-push-to-talk.git"
+  },
+  "homepage": "https://github.com/sqwxl/pi-push-to-talk#readme",
+  "bugs": {
+    "url": "https://github.com/sqwxl/pi-push-to-talk/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "scripts/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "changelog": "changelog-zero --history --style keepachangelog > CHANGELOG.md"
+  },
+  "dependencies": {
+    "decibri": "^3.4.2",
+    "sherpa-onnx-node": "^1.13.8"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "changelog-zero": "^0.1.0"
+  }
+}
