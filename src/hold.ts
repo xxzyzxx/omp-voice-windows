@@ -122,8 +122,10 @@ export class SpaceHold {
 
 		// A repeat proves the key is down, where a tap would have ended. Kitty
 		// names the event; without it only a press this close to the previous one
-		// can be a repeat of the same key.
-		const hold = this.holding && (repeated || gap <= REPEAT_GAP_MS);
+		// can be a repeat of the same key. [omp-windows patch] Where the OS key
+		// state is readable, the key must also be physically down: fast typing,
+		// unbracketed pastes and injected input send spaces this close together.
+		const hold = this.holding && (repeated || gap <= REPEAT_GAP_MS) && keyDown() !== false;
 		if (!hold) {
 			this.holding = true;
 			this.typedSpaces = 1;
