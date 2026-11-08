@@ -1,15 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { CapsToggle } from "./src/caps-toggle.ts";
 import { DictationEditor } from "./src/editor.ts";
 import { SpaceHold } from "./src/hold.ts";
-import { KeyHold } from "./src/key-hold.ts";
-import { focusHoldMs, focusKey } from "./src/local-config.ts";
 import { ProbeEditor } from "./src/probe.ts";
 import { listAudioSources, pinAudioSource } from "./src/source.ts";
 import { parseHost, writeSetup } from "./src/setup.ts";
 import { Stt } from "./src/stt.ts";
 import { VoiceOnlyMode } from "./src/voice-only.ts";
-import { VK_CAPITAL } from "./src/win-keystate.ts";
 
 type Ui = {
 	notify: (message: string, level: "info" | "warning" | "error") => void;
@@ -56,47 +52,20 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		},
 		// [omp-windows patch] Lets other extensions (omp-talk-local) stop speaking.
 		onStart: () => process.emit("omp-voice:dictation-start" as never),
-		// [omp-windows patch] Voice-only mode's global key: one hold, one prompt.
-		// Only global-key sessions reach here; in-window dictation never auto-sends.
+		// [omp-windows patch] Voice-only mode: one hold, one prompt.
 		onCommitted: () => {
-			if (editor && editor.focused !== false) editor.submitPrompt();
+			if (voiceOnlyMode.active && editor && editor.focused !== false) editor.submitPrompt();
 		},
 	});
-	// [omp-windows patch] OS-polled keys write into the prompt editor, so they
-	// must not start while a dialog or nested editor has the input.
-	const canDictate = (): boolean => editor !== undefined && editor.focused !== false;
-	const voiceOnlyMode = new VoiceOnlyMode(hold, canDictate);
+	const voiceOnlyMode = new VoiceOnlyMode(hold);
 	const showMode = (): void => ui?.setStatus("voice-only", voiceOnlyMode.active ? "🎙 voice-only" : undefined);
-
-	// [omp-windows patch] The in-window dictation key. Caps Lock (default) is a
-	// toggle whose LED shows recording; "Space" keeps upstream hold-Space.
-	const focus = focusKey();
-	const focusWatcher =
-		focus === VK_CAPITAL
-			? new CapsToggle({
-					isDictating: () => hold.dictating,
-					canStart: canDictate,
-					start: () => hold.beginToggle(),
-					stop: () => hold.stopToggle(),
-				})
-			: typeof focus === "number"
-				? new KeyHold(
-						{ vk: focus, holdMs: focusHoldMs(), focusOnly: true },
-						{
-							onHold: (vk) => {
-								if (canDictate()) hold.beginKeyHold(vk);
-							},
-							onChord: () => hold.cancel(),
-						},
-					)
-				: undefined;
 
 	pi.registerCommand("voice-only", {
 		description: "Toggle voice-only mode: global hold key (works in background) and auto-send after each dictation",
 		handler: async (_args, ctx) => {
 			if (voiceOnlyMode.active) {
 				voiceOnlyMode.disable();
-				ctx.ui.notify("Voice-only mode off: dictate in this window, press Enter to send", "info");
+				ctx.ui.notify("Voice-only mode off: hold Space in the prompt, press Enter to send", "info");
 			} else {
 				ctx.ui.notify(await voiceOnlyMode.enable(), "info");
 			}
@@ -174,10 +143,9 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 		unsubscribe?.();
 		// Probe mode replaces the editor purely to log keys; it must not consume
 		// space or start sessions.
-		unsubscribe = process.env.PI_DICTATION_PROBE || focus !== "space"
+		unsubscribe = process.env.PI_DICTATION_PROBE
 			? undefined
 			: ctx.ui.onTerminalInput((data) => (hold.handle(data) ? { consume: true } : undefined));
-		if (!process.env.PI_DICTATION_PROBE) focusWatcher?.start();
 
 		void voiceOnlyMode.restore().then((notice) => {
 			if (notice) ui?.notify(notice, "info");
@@ -194,7 +162,6 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		hold.cancel();
 		voiceOnlyMode.disable(false);
-		focusWatcher?.stop();
 		unsubscribe?.();
 		unsubscribe = undefined;
 	});
