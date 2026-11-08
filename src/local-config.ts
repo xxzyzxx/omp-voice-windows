@@ -3,7 +3,7 @@
  *
  *   {
  *     "device": "Microphone",   // capture device name substring (default: OS default input)
- *     "focusKey": "ScrollLock", // hold-to-talk while this OMP window has focus, or "off"
+ *     "focusKey": "RightCtrl",  // hold-to-talk while this OMP window has focus, or "off"
  *     "focusHoldMs": 150,       // how long the focus key must be held alone
  *     "voiceOnly": false,       // voice-only mode, toggled by /voice-only
  *     "globalKey": "RightCtrl", // voice-only mode: system-wide hold-to-talk key
@@ -79,7 +79,7 @@ function parseMs(ms: unknown, fallback: number): number {
 
 /** In-window hold-to-talk key as a virtual-key code; undefined when "off". */
 export function focusKey(): number | undefined {
-	return parseKey(readConfig().focusKey ?? "ScrollLock");
+	return parseKey(readConfig().focusKey ?? "RightCtrl");
 }
 
 export function focusHoldMs(): number {

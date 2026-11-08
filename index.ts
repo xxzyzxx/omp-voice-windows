@@ -61,7 +61,7 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 	const showMode = (): void => ui?.setStatus("voice-only", voiceOnlyMode.active ? "🎙 voice-only" : undefined);
 
 	// [omp-windows patch] In-window dictation: hold a key that types nothing
-	// (default Scroll Lock; "focusKey" in push-to-talk.json) instead of Space.
+	// (default Right Ctrl; "focusKey" in push-to-talk.json) instead of Space.
 	const focusVk = focusKey();
 	const focusHold =
 		focusVk === undefined
