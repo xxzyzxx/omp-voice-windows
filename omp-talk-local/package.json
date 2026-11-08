@@ -1,0 +1,19 @@
+{
+  "name": "omp-talk-local",
+  "version": "0.1.0",
+  "description": "Speak the <voice> summary of OMP replies with a local Kokoro model on Windows. Fork of @swairshah/pi-talk without Loqui/macOS dependencies.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "contributors": [
+    "Swair Shah (original @swairshah/pi-talk)"
+  ],
+  "keywords": ["omp-extension", "pi-extension", "tts", "kokoro", "local", "windows"],
+  "omp": {
+    "extensions": ["./index.ts"]
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "files": ["index.ts", "worker/kokoro_worker.py", "README.md", "LICENSE"]
+}
