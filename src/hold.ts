@@ -35,7 +35,7 @@ export type HoldDeps = {
 	createSession?: (stt: Stt | Promise<Stt>, ui: SessionUi) => DictationSession;
 	/** [omp-windows patch] A dictation session is starting (e.g. silence speech output). */
 	onStart?: () => void;
-	/** [omp-windows patch] A session ended with text in the editor (voice-only mode submits it). */
+	/** [omp-windows patch] A voice-only global-key session ended with text in the editor: send it. */
 	onCommitted?: () => void;
 };
 
@@ -60,6 +60,10 @@ export class SpaceHold {
 	private releasePoll: ReturnType<typeof setInterval> | undefined;
 	/** [omp-windows patch] The key whose release ends the live hold: Space, or the global key. */
 	private holdVk = VK_SPACE;
+	/** [omp-windows patch] The live session was toggled on (Caps Lock), not held. */
+	private toggle = false;
+	/** [omp-windows patch] Voice-only global-key session: its transcript is sent on commit. */
+	private submitOnCommit = false;
 
 	constructor(deps: HoldDeps) {
 		this.deps = deps;
@@ -90,6 +94,8 @@ export class SpaceHold {
 	cancel(): void {
 		trace("cancel");
 		this.holding = false;
+		this.toggle = false;
+		this.submitOnCommit = false;
 		this.holdId++;
 		this.beginQueued = false;
 		this.typedSpaces = 0;
@@ -143,17 +149,23 @@ export class SpaceHold {
 		this.pendingDelete += this.typedSpaces;
 		this.typedSpaces = 0;
 		this.holdVk = VK_SPACE;
+		this.toggle = false;
+		this.submitOnCommit = false;
 		this.requestBegin(this.holdId);
 		return true;
 	}
 
 	/**
-	 * [omp-windows patch] Start a hold from voice-only mode's global key. No
-	 * spaces were typed, so there is nothing to take back; the OS poll ends it.
+	 * [omp-windows patch] Start a hold from an OS-polled key (a non-Caps focus
+	 * key, or voice-only mode's global key). No spaces were typed, so there is
+	 * nothing to take back; the OS release poll ends it. `submit`: hand the
+	 * transcript to onCommitted (voice-only mode sends it).
 	 */
-	beginGlobal(vk: number): void {
-		if (this.session?.isActive() || this.starting) return;
-		trace(`global key 0x${vk.toString(16)} held`);
+	beginKeyHold(vk: number, submit = false): void {
+		if (this.dictating) return;
+		trace(`key 0x${vk.toString(16)} held`);
+		this.toggle = false;
+		this.submitOnCommit = submit;
 		this.holdVk = vk;
 		this.holding = true;
 		this.holdId++;
@@ -162,14 +174,44 @@ export class SpaceHold {
 		this.requestBegin(this.holdId);
 	}
 
+	/**
+	 * [omp-windows patch] Start a toggled dictation (Caps Lock): it runs until
+	 * stopToggle(), a submitted prompt, or a failure; no key needs to stay down.
+	 */
+	beginToggle(): void {
+		if (this.dictating) return;
+		trace("toggle on");
+		this.toggle = true;
+		this.submitOnCommit = false;
+		this.holding = true;
+		this.holdId++;
+		this.typedSpaces = 0;
+		this.pendingDelete = 0;
+		this.requestBegin(this.holdId);
+	}
+
+	/** [omp-windows patch] End a toggled dictation and keep its transcript. */
+	stopToggle(): void {
+		trace("toggle off");
+		this.finish();
+	}
+
+	/** [omp-windows patch] A session is starting or running. */
+	get dictating(): boolean {
+		return this.starting || this.session?.isActive() === true;
+	}
+
 	private finish(): void {
+		const submit = this.submitOnCommit;
 		this.holding = false;
+		this.toggle = false;
+		this.submitOnCommit = false;
 		this.stopReleasePoll();
 		if (!this.session) return;
 		this.stopping = this.session
 			.stop()
 			.then((committed) => {
-				if (committed) this.deps.onCommitted?.();
+				if (committed && submit) this.deps.onCommitted?.();
 			})
 			.catch((error: unknown) => {
 				this.deps.notify(`Dictation: ${String(error)}`, "error");
@@ -183,7 +225,7 @@ export class SpaceHold {
 	 */
 	private startReleasePoll(id: number): void {
 		this.stopReleasePoll();
-		if (keyDown(this.holdVk) === undefined) return;
+		if (this.toggle || keyDown(this.holdVk) === undefined) return;
 		this.releasePoll = setInterval(() => {
 			try {
 				if (id !== this.holdId) {
@@ -225,6 +267,8 @@ export class SpaceHold {
 		}
 		this.starting = true;
 		this.startReleasePoll(id);
+		// finish() clears the flag when the key is released before capture began.
+		const submit = this.submitOnCommit;
 		let takenBack = 0;
 		try {
 			const editor = this.deps.getEditor();
@@ -270,7 +314,7 @@ export class SpaceHold {
 				const committed = await session.stop();
 				if (!committed) {
 					for (let i = 0; i < takenBack; i++) editor.typeSpace();
-				} else {
+				} else if (submit) {
 					this.deps.onCommitted?.();
 				}
 			}
