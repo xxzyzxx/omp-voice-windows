@@ -11,7 +11,7 @@
  * Release is detected by SpaceHold's own OS-state poll; this class only
  * reports the start of a hold and chords.
  */
-import { keyDown } from "./win-keystate.ts";
+import { consoleFocused, keyDown } from "./win-keystate.ts";
 
 const POLL_MS = 30;
 
@@ -40,6 +40,8 @@ export class GlobalKey {
 		private readonly vk: number,
 		private readonly holdMs: number,
 		private readonly handlers: GlobalKeyHandlers,
+		/** Only start while this OMP window has keyboard focus (the in-window dictation key). */
+		private readonly focusOnly = false,
 	) {}
 
 	start(): void {
@@ -67,7 +69,10 @@ export class GlobalKey {
 		}
 		switch (phase.kind) {
 			case "idle":
-				this.#phase = this.#otherKeyDown() ? { kind: "blocked" } : { kind: "pending", since: Date.now() };
+				this.#phase =
+					this.#otherKeyDown() || (this.focusOnly && consoleFocused() === false)
+						? { kind: "blocked" }
+						: { kind: "pending", since: Date.now() };
 				return;
 			case "pending":
 				if (this.#otherKeyDown()) {

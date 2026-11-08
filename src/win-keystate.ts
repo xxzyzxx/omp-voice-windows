@@ -28,3 +28,31 @@ export function keyDown(vk: number = VK_SPACE): boolean | undefined {
 	}
 	return read ? read(vk) : undefined;
 }
+
+let focused: (() => boolean) | null | undefined;
+
+/**
+ * Whether this OMP's terminal window has keyboard focus; undefined off Windows.
+ * conhost: the console window is the foreground window. Windows Terminal: the
+ * console is a hidden pseudo-window owned by the foreground terminal window.
+ */
+export function consoleFocused(): boolean | undefined {
+	if (process.platform !== "win32") return undefined;
+	if (focused === undefined) {
+		try {
+			const user32 = dlopen("user32.dll", {
+				GetForegroundWindow: { args: [], returns: FFIType.ptr },
+				GetAncestor: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.ptr },
+			});
+			const kernel32 = dlopen("kernel32.dll", { GetConsoleWindow: { args: [], returns: FFIType.ptr } });
+			focused = () => {
+				const fg = user32.symbols.GetForegroundWindow();
+				const console = kernel32.symbols.GetConsoleWindow();
+				return !!fg && !!console && (fg === console || fg === user32.symbols.GetAncestor(console, 3));
+			};
+		} catch {
+			focused = null;
+		}
+	}
+	return focused ? focused() : undefined;
+}

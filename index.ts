@@ -5,20 +5,20 @@ import { ProbeEditor } from "./src/probe.ts";
 import { listAudioSources, pinAudioSource } from "./src/source.ts";
 import { parseHost, writeSetup } from "./src/setup.ts";
 import { Stt } from "./src/stt.ts";
+import { GlobalKey } from "./src/global-key.ts";
+import { focusHoldMs, focusKey } from "./src/local-config.ts";
 import { VoiceOnlyMode } from "./src/voice-only.ts";
 
 type Ui = {
 	notify: (message: string, level: "info" | "warning" | "error") => void;
 	setStatus: (key: string, text: string | undefined) => void;
 	theme: { fg: (color: "error", text: string) => string };
-	onTerminalInput: (handler: (data: string) => { consume?: boolean } | undefined) => () => void;
 };
 
 export default function dictationExtension(pi: ExtensionAPI): void {
 	let ui: Ui | undefined;
 	let editor: DictationEditor | undefined;
 	let sttPromise: Promise<Stt> | undefined;
-	let unsubscribe: (() => void) | undefined;
 
 	const getStt = (): Promise<Stt> => {
 		if (!sttPromise) {
@@ -60,12 +60,25 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 	const voiceOnlyMode = new VoiceOnlyMode(hold);
 	const showMode = (): void => ui?.setStatus("voice-only", voiceOnlyMode.active ? "🎙 voice-only" : undefined);
 
+	// [omp-windows patch] In-window dictation: hold a key that types nothing
+	// (default Scroll Lock; "focusKey" in push-to-talk.json) instead of Space.
+	const focusVk = focusKey();
+	const focusHold =
+		focusVk === undefined
+			? undefined
+			: new GlobalKey(
+					focusVk,
+					focusHoldMs(),
+					{ onHold: (vk) => hold.beginGlobal(vk), onChord: () => hold.cancel() },
+					true,
+				);
+
 	pi.registerCommand("voice-only", {
 		description: "Toggle voice-only mode: global hold key (works in background) and auto-send after each dictation",
 		handler: async (_args, ctx) => {
 			if (voiceOnlyMode.active) {
 				voiceOnlyMode.disable();
-				ctx.ui.notify("Voice-only mode off: hold Space in the prompt, press Enter to send", "info");
+				ctx.ui.notify("Voice-only mode off: hold the dictation key in this window, press Enter to send", "info");
 			} else {
 				ctx.ui.notify(await voiceOnlyMode.enable(), "info");
 			}
@@ -140,12 +153,10 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 			return editor;
 		});
 
-		unsubscribe?.();
-		// Probe mode replaces the editor purely to log keys; it must not consume
-		// space or start sessions.
-		unsubscribe = process.env.PI_DICTATION_PROBE
-			? undefined
-			: ctx.ui.onTerminalInput((data) => (hold.handle(data) ? { consume: true } : undefined));
+		// [omp-windows patch] Space is no longer a dictation key; probe mode
+		// (key logging only) starts no sessions.
+		focusHold?.stop();
+		if (!process.env.PI_DICTATION_PROBE) focusHold?.start();
 
 		void voiceOnlyMode.restore().then((notice) => {
 			if (notice) ui?.notify(notice, "info");
@@ -162,7 +173,6 @@ export default function dictationExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		hold.cancel();
 		voiceOnlyMode.disable(false);
-		unsubscribe?.();
-		unsubscribe = undefined;
+		focusHold?.stop();
 	});
 }
