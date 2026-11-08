@@ -13,7 +13,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { dlopen, FFIType } from "bun:ffi";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 const HOME_DIR = path.join(os.homedir(), ".omp", "talk-local");
@@ -234,31 +233,12 @@ class KokoroWorker {
 	}
 }
 
-/** Physical key state (Windows), used to notice push-to-talk holds on Space. */
-let asyncKeyState: ((vk: number) => boolean) | null | undefined;
-function spaceHeld(): boolean {
-	if (process.platform !== "win32") return false;
-	if (asyncKeyState === undefined) {
-		try {
-			const user32 = dlopen("user32.dll", { GetAsyncKeyState: { args: [FFIType.i32], returns: FFIType.i16 } });
-			asyncKeyState = (vk) => (user32.symbols.GetAsyncKeyState(vk) & 0x8000) !== 0;
-		} catch {
-			asyncKeyState = null;
-		}
-	}
-	return asyncKeyState ? asyncKeyState(0x20) : false;
-}
-
-/** A Space press still down after this long is a push-to-talk hold, not a typed space. */
-const PTT_HOLD_MS = 300;
-
 type Ctx = {
 	hasUI: boolean;
 	agent?: { kind: "main" | "sub" };
 	ui: {
 		notify(message: string, level: "info" | "warning" | "error"): void;
 		setStatus(key: string, text: string | undefined): void;
-		onTerminalInput?(handler: (data: string) => { consume?: boolean } | undefined): () => void;
 	};
 };
 
@@ -266,10 +246,12 @@ export default function ompTalkLocal(pi: ExtensionAPI): void {
 	const settings = loadSettings();
 	const worker = new KokoroWorker();
 	let ui: Ctx["ui"] | undefined;
-	let unsubscribeInput: (() => void) | undefined;
-	let pttTimer: ReturnType<typeof setTimeout> | undefined;
 	const exitHook = (): void => worker.kill();
 	process.once("exit", exitHook);
+	// pi-push-to-talk (omp-windows patch) emits this when a dictation starts,
+	// from Space in the prompt or voice-only mode's global key.
+	const dictationHook = (): void => worker.stop();
+	process.on("omp-voice:dictation-start" as never, dictationHook);
 
 	worker.onError = (message) => ui?.notify(`TTS: ${message}`, "warning");
 
@@ -301,18 +283,6 @@ export default function ompTalkLocal(pi: ExtensionAPI): void {
 		if (!ctx.hasUI || !isMain(ctx)) return;
 		ui = ctx.ui;
 		updateStatus();
-		unsubscribeInput?.();
-		// Stop speaking as soon as a push-to-talk hold on Space begins. The
-		// first press always reaches every listener; the OS key state tells a
-		// hold from a typed space.
-		unsubscribeInput = ctx.ui.onTerminalInput?.((data) => {
-			if (data !== " " || pttTimer) return undefined;
-			pttTimer = setTimeout(() => {
-				pttTimer = undefined;
-				if (spaceHeld()) worker.stop();
-			}, PTT_HOLD_MS);
-			return undefined;
-		});
 	});
 
 	// A new prompt makes the previous answer moot.
@@ -352,10 +322,7 @@ export default function ompTalkLocal(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
-		clearTimeout(pttTimer);
-		pttTimer = undefined;
-		unsubscribeInput?.();
-		unsubscribeInput = undefined;
+		process.off("omp-voice:dictation-start" as never, dictationHook);
 		worker.shutdown();
 		process.off("exit", exitHook);
 	});
