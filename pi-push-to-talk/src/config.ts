@@ -1,0 +1,58 @@
+import os from "node:os";
+import path from "node:path";
+
+export const SAMPLE_RATE = 16000;
+
+/** How often the still-open phrase is re-decoded for the live preview. */
+export const PARTIAL_INTERVAL_MS = 1000;
+
+/**
+ * Silence that closes a phrase.
+ *
+ * Long on purpose: a pause mid-sentence is the speaker thinking, not the end of
+ * a thought. Cutting there splits words across two decodes, which is where lost
+ * and reordered words come from. The 12 s cap still bounds a non-stop stretch.
+ */
+export const SILENCE_COMMIT_MS = 2500;
+
+/** Trailing silence kept with a phrase so its last word is not clipped. */
+export const TAIL_PAD_MS = 300;
+
+/** Shorter buffers are not worth a decode. */
+export const MIN_PHRASE_MS = 400;
+
+/** Longest phrase sent to the recognizer in one piece. */
+export const MAX_PHRASE_MS = 12000;
+
+/** Window scanned for the quietest point when the cap fires. */
+export const CAP_CUT_SCAN_MS = 800;
+
+/** Mean level below which a buffer counts as silence, not speech. */
+export const MIN_PHRASE_RMS = 0.005;
+
+/**
+ * A space press this soon after the previous one repeats a held key instead of
+ * tapping a second time. Kitty names repeats exactly; this window covers the
+ * terminals that send a bare space for both.
+ */
+export const REPEAT_GAP_MS = 150;
+
+/**
+ * Loopback ports a client may forward its microphone helper to. Each client
+ * picks a free one when it sets up, so two machines never claim the same port
+ * on the same host.
+ */
+export const AUDIO_PORTS = Array.from({ length: 16 }, (_, index) => 47777 + index);
+
+/**
+ * A space press this long after the previous space event is a new press, not
+ * the auto-repeat of a held key. Used to recover a lost key release.
+ */
+export const RELEASE_GAP_MS = 250;
+
+/** The listening indicator alternates filled and empty at this interval. */
+export const LISTENING_BLINK_MS = 600;
+
+export const MODEL_DIR = path.join(os.homedir(), ".pi", "models", "whisper-base");
+
+export const msToSamples = (ms: number): number => Math.round((SAMPLE_RATE * ms) / 1000);

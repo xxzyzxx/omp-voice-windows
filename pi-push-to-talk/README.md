@@ -1,0 +1,146 @@
+# pi-push-to-talk
+
+Hold space in pi's prompt to dictate. Your words appear where the cursor is, and speech recognition runs on your machine.
+
+```
+hold space  →  speak  →  release
+```
+
+No overlay, no separate window, no API key. The transcript is ordinary text in the editor, so you can keep typing, move the cursor, and dictate again wherever you are.
+
+## Install
+
+```bash
+pi install npm:pi-push-to-talk
+```
+
+Remove any other voice extension first. Several of them also bind space or replace the editor, and two handlers on one key produce dropped spaces.
+
+## Use
+
+| Action | Result |
+|---|---|
+| Hold space until the key repeats | Recording starts; text appears at the cursor every second and updates in place |
+| Release | That phrase is transcribed and committed |
+| Pause 2.5 s while holding | The open phrase is committed and dictation continues |
+| Tap space | An ordinary space, as usual |
+
+While you speak, the open phrase is drawn dim; committed text is normal. The footer alternates a red `●` with `○` every 600 ms: `● listening` while the microphone is live, or `● loading model` until Whisper is ready.
+
+## First run
+
+Whisper base is downloaded once, about 198 MB, into `~/.pi/models/whisper-base/`. Only the int8 files are kept. After that, dictation is fully offline.
+
+Extraction uses the system `tar` with bzip2 support, which is present on macOS, Linux, and Windows 10+.
+
+## Remote machine
+
+pi can run on a host with no usable audio input. Dictation can then record on the machine running the terminal and send the audio over SSH.
+
+On the host running pi:
+
+```
+/dictation-setup bluefin.local
+```
+
+The argument is the host that runs pi, the name you SSH to for it. Without it the command asks.
+
+It writes a setup script there and shows the one line to run on the machine with the microphone:
+
+```sh
+scp bluefin.local:/tmp/pi-dictation-setup.sh /tmp/ && sh /tmp/pi-dictation-setup.sh
+```
+
+That script installs `~/.local/bin/pi-mic-stream`, picks a port on that host which is still free, and adds one SSH entry for it. Every later connection then starts a recorder on loopback and forwards it. pi probes `47777`-`47792` when a hold starts and opens every port whose helper greets. With one machine connected it uses that stream at once. With several, it buffers a short window and keeps the stream where speech rose furthest above its own noise floor — a quiet laptop wins over a humming desktop, because the comparison is relative. The chosen machine is shown as `● listening via t14`. When no port answers, pi records from the host's own microphone.
+
+The entry the script writes, with the port it chose:
+
+```sshconfig
+Host bluefin.local
+  RemoteForward 127.0.0.1:47778 127.0.0.1:17777
+  PermitLocalCommand yes
+  LocalCommand sh -c 'nohup "$HOME/.local/bin/pi-mic-stream" %h >/dev/null 2>&1 &'
+  # Successful connections need no forwarding log; every later one would warn.
+  LogLevel ERROR
+```
+
+`LogLevel ERROR` hides the `remote port forwarding failed` warning that every later connection to that host would otherwise print, because the port is already served.
+
+If the client config lives elsewhere, or you set machines up by hand, copy `scripts/pi-mic-stream` from this package and add the entry yourself. The script is safe to run again, and it keeps any SSH config already on that machine.
+
+Requirements on the machine with the microphone:
+
+- `socat`
+- `parec` (Linux) or `ffmpeg` (macOS), plus microphone permission for the terminal
+
+The setup script stops and names whichever of these is missing, then starts the helper and checks that it answers on `17777`. A helper that cannot greet fails the setup instead of leaving a port that accepts connections with no audio behind it.
+
+Notes:
+
+- The helper listens on loopback only, and the forward binds loopback on the remote host. Nothing is exposed to the network.
+- One recorder starts per hold, so the microphone is open only while you speak. With two machines connected, both record for the first moments of a hold until one is dropped.
+- The stream is 16 kHz mono, about 32 KB/s. SSH compression does not help it.
+- Each connection to a helper starts with one `pi-mic <host>` line: it names the machine, and it lets pi skip ports that a stale session or another machine answers.
+- A refused forward is not fatal: the helper asks the connection that started it for the first free port in the range, so a port held by a stale session only costs one candidate. This needs a multiplexed connection (a control socket); a plain one-off `ssh` keeps the single configured port.
+- On the host that runs pi, sshd should reap dead sessions. Without this, a client that sleeps or loses its network can leave a port bound for hours:
+
+  ```sshconfig
+  # /etc/ssh/sshd_config on the host that runs pi
+  ClientAliveInterval 15
+  ClientAliveCountMax 3
+  ```
+
+  Those sessions then end about 45 seconds after the client stops answering, and their ports free.
+- `PI_DICTATION_AUDIO=host:port` overrides the search and warns, instead of falling back silently, when the stream is missing.
+- `/dictation-source` lists the machines whose microphones answer, and `/dictation-source t14` records from one of them, skipping the energy comparison. Without it, pi decides from the audio itself, so a single connected machine needs nothing.
+- Any local user on the remote host can connect to the forwarded port and record the client microphone. Use a host you trust.
+
+Ports:
+
+- The range `47777`-`47792` is reserved for this. Each client takes a free one when it sets up, so two machines never claim the same port on the same host.
+- On Fedora, SELinux lets sshd listen only on 32768-60999, which the range is inside.
+
+## How it works
+
+- Capture: the local device through `decibri`, or 16 kHz mono PCM from `127.0.0.1:47777` when SSH forwards a microphone there.
+- Recognition: `sherpa-onnx-node` runs Whisper base int8 on the CPU, four threads.
+- Segmentation: a phrase closes after 2.5 s of silence or 12 s of unbroken speech; the cut lands in the quietest part of the last 800 ms, not mid-syllable.
+- Editor: the extension owns the prompt editor, but only to write text. Keys are handled on the raw terminal path and only while the main editor has focus, so dialogs and nested editors keep working.
+
+## Requirements
+
+- pi with extension support
+- A terminal with key repeat turned on. Every terminal repeats a held key; kitty, Ghostty, foot, WezTerm, and tmux with extended keys also name the repeat event.
+- A microphone the terminal may use, or a remote audio stream
+- `socat` and `parec` or `ffmpeg` on the machine with the microphone, for remote use
+- macOS, Linux, or Windows, x64 or arm64
+
+## Known limits
+
+- Undo history records each preview rewrite; `Ctrl+Z` after a dictation steps back through them. The editor API offers no way to write without an undo entry.
+- English only.
+- Brackets are stripped from transcripts, since Whisper emits them as sound captions. Dictating code with brackets is not supported.
+- The cursor is restored with simulated left-arrow presses, capped at 4,000 characters. Inserting near the start of a very long prompt can leave the cursor short of the dictation point.
+- Nested editors (dialogs) do not accept dictation, only normal typing.
+- Hold-to-talk starts on the first key repeat, so dictation begins after the OS repeat delay, about 0.2 to 0.7 s. A terminal with key repeat turned off never starts a session; the space stays.
+- Key releases are optional. A terminal that sends none, such as the Linux console, stops dictation on the next key instead. A re-press is recognised as a new key after 250 ms without a space event, so a keyboard whose auto-repeat is slower than that would stop early.
+
+## Diagnostics
+
+Both are off unless the environment variable is set; both write only to `/tmp`.
+
+| Variable | File | Content |
+|---|---|---|
+| `PI_DICTATION_DEBUG=1` | `/tmp/pi-dictation.log` | Space events, phrase decodes, cancels, and session commits |
+| `PI_DICTATION_PROBE=1` | `/tmp/pi-dictation-probe.log` | Every terminal key sequence, for diagnosing key encoding. Dictation is disabled in this mode. |
+
+## Uninstall
+
+```bash
+pi remove npm:pi-push-to-talk
+rm -rf ~/.pi/models/whisper-base   # optional, frees 154 MB
+```
+
+## License
+
+MIT
