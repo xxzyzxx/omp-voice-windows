@@ -5,11 +5,10 @@
  * linear resampler when the device refuses, which is what built-in mics do on
  * some Linux setups.
  */
-import { createRequire } from "node:module";
 import { SAMPLE_RATE, msToSamples } from "./config.ts";
+import { captureDevice } from "./local-config.ts";
+import { loadDecibri } from "./native.ts";
 import { int16ToFloat32 } from "./pcm.ts";
-
-const require = createRequire(import.meta.url);
 
 export interface Microphone {
 	stop(): void;
@@ -47,7 +46,13 @@ export async function openMicrophone(
 	onSamples: (samples: Float32Array) => void,
 	onError: (error: Error) => void,
 ): Promise<Microphone> {
-	const Decibri = require("decibri");
+	// [omp-windows patch] was require("decibri"); see native.ts.
+	const Decibri = (await loadDecibri()) as new (options: Record<string, unknown>) => {
+		on(event: string, listener: (...args: never[]) => void): void;
+		once(event: string, listener: () => void): void;
+		stop(): void;
+	};
+	const device = captureDevice();
 	let failure: Error = new Error("no capture device");
 
 	for (const rate of FALLBACK_RATES) {
@@ -57,6 +62,7 @@ export async function openMicrophone(
 				channels: 1,
 				framesPerBuffer: Math.round((msToSamples(100) * rate) / SAMPLE_RATE),
 				format: "int16",
+				...(device ? { device } : {}),
 			});
 			const resample = makeResampler(rate);
 			let stopped = false;

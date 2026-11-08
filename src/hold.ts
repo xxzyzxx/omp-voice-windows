@@ -19,6 +19,10 @@ import type { DictationEditor } from "./editor.ts";
 import { createRegion } from "./region.ts";
 import { DictationSession, type SessionUi } from "./session.ts";
 import type { Stt } from "./stt.ts";
+import { keyDown } from "./win-keystate.ts";
+
+/** [omp-windows patch] How often the OS key state is read while a hold is live. */
+const RELEASE_POLL_MS = 25;
 
 export type HoldDeps = {
 	getEditor: () => DictationEditor | undefined;
@@ -48,6 +52,8 @@ export class SpaceHold {
 	private pendingDelete = 0;
 	/** Resolves when the previous session finished its final decode. */
 	private stopping: Promise<unknown> = Promise.resolve();
+	/** [omp-windows patch] Reads the physical space key while a hold is live. */
+	private releasePoll: ReturnType<typeof setInterval> | undefined;
 
 	constructor(deps: HoldDeps) {
 		this.deps = deps;
@@ -82,6 +88,7 @@ export class SpaceHold {
 		this.beginQueued = false;
 		this.typedSpaces = 0;
 		this.pendingDelete = 0;
+		this.stopReleasePoll();
 		this.session?.cancel();
 		this.session = undefined;
 	}
@@ -133,10 +140,43 @@ export class SpaceHold {
 
 	private finish(): void {
 		this.holding = false;
+		this.stopReleasePoll();
 		if (!this.session) return;
 		this.stopping = this.session.stop().catch((error: unknown) => {
 			this.deps.notify(`Dictation: ${String(error)}`, "error");
 		});
+	}
+
+	/**
+	 * [omp-windows patch] The terminal never reports the release on Windows, so
+	 * watch the physical key from the moment a hold is recognised. A missing OS
+	 * reading (non-Windows) leaves the upstream terminal-release logic in charge.
+	 */
+	private startReleasePoll(id: number): void {
+		this.stopReleasePoll();
+		if (keyDown() === undefined) return;
+		this.releasePoll = setInterval(() => {
+			try {
+				if (id !== this.holdId) {
+					this.stopReleasePoll();
+					return;
+				}
+				if (keyDown() === false) {
+					trace("release from OS key state");
+					this.finish();
+				}
+			} catch (error) {
+				this.stopReleasePoll();
+				trace(`release poll failed: ${String(error)}`);
+			}
+		}, RELEASE_POLL_MS);
+	}
+
+	private stopReleasePoll(): void {
+		if (this.releasePoll) {
+			clearInterval(this.releasePoll);
+			this.releasePoll = undefined;
+		}
 	}
 
 	/** Start against the given press; queue it when an older begin is still unwinding. */
@@ -155,6 +195,7 @@ export class SpaceHold {
 			return;
 		}
 		this.starting = true;
+		this.startReleasePoll(id);
 		let takenBack = 0;
 		try {
 			const editor = this.deps.getEditor();

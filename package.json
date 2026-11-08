@@ -25,6 +25,11 @@
   "engines": {
     "node": ">=20"
   },
+  "omp": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "pi": {
     "extensions": [
       "./index.ts"

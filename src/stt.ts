@@ -4,14 +4,12 @@
  * Decodes are FIFO-queued: the native handle tolerates one decode at a time and
  * the preview can overlap a phrase commit.
  */
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { MODEL_DIR, SAMPLE_RATE } from "./config.ts";
 import { trace } from "./debug.ts";
 import { ensureModel } from "./model.ts";
-
-const require = createRequire(import.meta.url);
+import { loadSherpa } from "./native.ts";
 
 type Recognizer = {
 	createStream(): unknown;
@@ -59,8 +57,9 @@ export class Stt {
 	/** Async so loading the model does not block the UI on first dictation. */
 	static async create(modelDir: string = MODEL_DIR, onProgress?: (message: string) => void): Promise<Stt> {
 		await ensureModel(modelDir, onProgress);
-		const sherpa = require("sherpa-onnx-node");
-		const RecognizerClass = sherpa.OfflineRecognizer as RecognizerCtor;
+		// [omp-windows patch] was require("sherpa-onnx-node"); see native.ts.
+		const sherpa = (await loadSherpa()) as { OfflineRecognizer: RecognizerCtor };
+		const RecognizerClass = sherpa.OfflineRecognizer;
 		const config = recognizerConfig(modelDir);
 		const recognizer =
 			typeof RecognizerClass.createAsync === "function"
